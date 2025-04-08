@@ -1,11 +1,11 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "paper-canvas",
+	"name": "Paper Canvas",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
-	"isDesktopOnly": false
+	"description": "Limiting the size of Obsidan Canvas to the size of standard A4 paper size or any size the user want and being able to export Canvas as a PDF instead of an Image.",
+	"author": "Hassieb Hassieb",
+	"authorUrl": "https://github.com/Hassibi501",
+	"fundingUrl": "https://account.venmo.com/u/hassibi",
+	"isDesktopOnly": true
 }
