@@ -1,8 +1,62 @@
-/*
+/* Paper Canvas Plugin Styles */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.paper-canvas-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 
-If your plugin does not need CSS, delete this file.
+.paper-canvas-toolbar {
+  display: flex;
+  padding: 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  align-items: center;
+}
 
-*/
+.paper-canvas-toolbar button {
+  margin-right: 8px;
+}
+
+.paper-canvas-page-navigator {
+  display: flex;
+  padding: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
+}
+
+.paper-canvas-page-navigator button {
+  margin-right: 4px;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.paper-canvas-page-navigator button.active {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.paper-canvas-canvas-container {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background-color: var(--background-primary-alt);
+}
+
+.paper-canvas-page {
+  background-color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+
+.paper-canvas-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 1.2em;
+}

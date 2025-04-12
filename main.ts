@@ -1,85 +1,58 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { PaperCanvasView, PAPER_CANVAS_VIEW_TYPE } from './paper-canvas-view';
 
-// Remember to rename these classes and interfaces!
 
-interface MyPluginSettings {
-	mySetting: string;
+interface PaperCanvasSettings {
+	paperSize: string;
+	customWidth: number;
+	customHeight: number;
+	paperUnit: string; // mm, cm, in
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: PaperCanvasSettings = {
+	paperSize: 'a4',
+	customWidth: 210,
+	customHeight: 297,
+	paperUnit: 'mm'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+const PAPER_SIZES: Record<'a4' | 'a5' | 'letter' | 'legal' | 'custom', { width: number; height: number }> = {
+
+	'a4': { width: 210, height: 297 }, // mm
+	'a5': { width: 148, height: 210 }, // mm
+	'letter': { width: 216, height: 279 }, // mm (8.5 x 11 inches)
+	'legal': { width: 216, height: 356 }, // mm (8.5 x 14 inches)
+	'custom': { width: 0, height: 0 } // Will be replaced with customWidth and customHeight
+};
+
+export default class PaperCanvasPlugin extends Plugin {
+	settings: PaperCanvasSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		// Register the custom view type
+		this.registerView(
+			PAPER_CANVAS_VIEW_TYPE,
+			(leaf) => new PaperCanvasView(leaf, this)
+		);
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
+		// Add a command to create a new paper canvas
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
+			id: 'create-paper-canvas',
+			name: 'Create new Paper Canvas',
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
+				this.createNewPaperCanvas();
 			}
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		// Add settings tab
+		this.addSettingTab(new PaperCanvasSettingTab(this.app, this));
 	}
 
 	onunload() {
-
+		// Unregister the view when the plugin is disabled
+		this.app.workspace.detachLeavesOfType(PAPER_CANVAS_VIEW_TYPE);
 	}
 
 	async loadSettings() {
@@ -89,46 +62,105 @@ export default class MyPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	async createNewPaperCanvas() {
+		const leaf = this.app.workspace.getLeaf(true);
+		await leaf.setViewState({
+			type: PAPER_CANVAS_VIEW_TYPE,
+			state: { 
+				paperSize: this.settings.paperSize,
+				customWidth: this.settings.customWidth,
+				customHeight: this.settings.customHeight,
+				paperUnit: this.settings.paperUnit,
+				pages: [{ id: '1', nodes: [] }] // Start with one empty page
+			}
+		});
+	}
+
+	getPaperDimensions(): { width: number, height: number } {
+		if (this.settings.paperSize === 'custom') {
+			return {
+				width: this.settings.customWidth,
+				height: this.settings.customHeight
+			};
+		} else {
+			return PAPER_SIZES[this.settings.paperSize as keyof typeof PAPER_SIZES];
+
+		}
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class PaperCanvasSettingTab extends PluginSettingTab {
+	plugin: PaperCanvasPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: PaperCanvasPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
+		containerEl.createEl('h2', { text: 'Paper Canvas Settings' });
+
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+			.setName('Paper Size')
+			.setDesc('Choose a predefined paper size or select custom to specify dimensions')
+			.addDropdown(dropdown => dropdown
+				.addOption('a4', 'A4')
+				.addOption('a5', 'A5')
+				.addOption('letter', 'Letter')
+				.addOption('legal', 'Legal')
+				.addOption('custom', 'Custom')
+				.setValue(this.plugin.settings.paperSize)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.paperSize = value;
 					await this.plugin.saveSettings();
+					// Refresh the display to show/hide custom size inputs
+					this.display();
 				}));
+
+		if (this.plugin.settings.paperSize === 'custom') {
+			new Setting(containerEl)
+				.setName('Custom Width')
+				.setDesc('Width of the paper')
+				.addText(text => text
+					.setValue(this.plugin.settings.customWidth.toString())
+					.onChange(async (value) => {
+						const numValue = parseFloat(value);
+						if (!isNaN(numValue) && numValue > 0) {
+							this.plugin.settings.customWidth = numValue;
+							await this.plugin.saveSettings();
+						}
+					}));
+
+			new Setting(containerEl)
+				.setName('Custom Height')
+				.setDesc('Height of the paper')
+				.addText(text => text
+					.setValue(this.plugin.settings.customHeight.toString())
+					.onChange(async (value) => {
+						const numValue = parseFloat(value);
+						if (!isNaN(numValue) && numValue > 0) {
+							this.plugin.settings.customHeight = numValue;
+							await this.plugin.saveSettings();
+						}
+					}));
+
+			new Setting(containerEl)
+				.setName('Unit')
+				.setDesc('Unit of measurement')
+				.addDropdown(dropdown => dropdown
+					.addOption('mm', 'Millimeters (mm)')
+					.addOption('cm', 'Centimeters (cm)')
+					.addOption('in', 'Inches (in)')
+					.setValue(this.plugin.settings.paperUnit)
+					.onChange(async (value) => {
+						this.plugin.settings.paperUnit = value;
+						await this.plugin.saveSettings();
+					}));
+		}
 	}
 }
