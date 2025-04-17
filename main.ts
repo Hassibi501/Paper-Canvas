@@ -64,6 +64,7 @@ export default class PaperCanvasPlugin extends Plugin {
 	}
 
 	async createNewPaperCanvas() {
+		console.log("📄 Creating a new paper canvas...");
 		const leaf = this.app.workspace.getLeaf(true);
 		await leaf.setViewState({
 			type: PAPER_CANVAS_VIEW_TYPE,
@@ -72,10 +73,11 @@ export default class PaperCanvasPlugin extends Plugin {
 				customWidth: this.settings.customWidth,
 				customHeight: this.settings.customHeight,
 				paperUnit: this.settings.paperUnit,
-				pages: [{ id: '1', nodes: [] }] // Start with one empty page
+				pages: [{ id: '1', nodes: [] }]
 			}
 		});
 	}
+	
 
 	getPaperDimensions(): { width: number, height: number } {
 		if (this.settings.paperSize === 'custom') {
