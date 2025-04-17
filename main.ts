@@ -1,166 +1,274 @@
-import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
-import { PaperCanvasView, PAPER_CANVAS_VIEW_TYPE } from './paper-canvas-view';
+import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
 
-
-interface PaperCanvasSettings {
-	paperSize: string;
-	customWidth: number;
-	customHeight: number;
-	paperUnit: string; // mm, cm, in
-}
-
-const DEFAULT_SETTINGS: PaperCanvasSettings = {
-	paperSize: 'a4',
-	customWidth: 210,
-	customHeight: 297,
-	paperUnit: 'mm'
-}
-
-const PAPER_SIZES: Record<'a4' | 'a5' | 'letter' | 'legal' | 'custom', { width: number; height: number }> = {
-
-	'a4': { width: 210, height: 297 }, // mm
-	'a5': { width: 148, height: 210 }, // mm
-	'letter': { width: 216, height: 279 }, // mm (8.5 x 11 inches)
-	'legal': { width: 216, height: 356 }, // mm (8.5 x 14 inches)
-	'custom': { width: 0, height: 0 } // Will be replaced with customWidth and customHeight
+// --- Configuration ---
+const PAGE_WIDTH_PX = 794;
+const PAGE_HEIGHT_PX = 1123;
+const PAGE_BOUNDS = {
+    minX: 0,
+    minY: 0,
+    maxX: PAGE_WIDTH_PX,
+    maxY: PAGE_HEIGHT_PX,
 };
 
+// --- Plugin Class ---
 export default class PaperCanvasPlugin extends Plugin {
-	settings: PaperCanvasSettings;
+    // Ensure this is typed correctly
+    private observer: MutationObserver | null = null;
+    private observedCanvasElement: HTMLElement | null = null; // Explicitly type as HTMLElement
+    private pageMarkerElement: HTMLElement | null = null;
 
-	async onload() {
-		await this.loadSettings();
+    async onload() {
+        console.log('Loading Paper Canvas Plugin (Draft v2)');
 
-		// Register the custom view type
-		this.registerView(
-			PAPER_CANVAS_VIEW_TYPE,
-			(leaf) => new PaperCanvasView(leaf, this)
-		);
+        this.registerEvent(
+            this.app.workspace.on('layout-change', this.handleLayoutChange)
+        );
 
-		// Add a command to create a new paper canvas
-		this.addCommand({
-			id: 'create-paper-canvas',
-			name: 'Create new Paper Canvas',
-			callback: () => {
-				this.createNewPaperCanvas();
-			}
-		});
+        this.app.workspace.onLayoutReady(() => {
+            this.handleLayoutChange();
+        });
 
-		// Add settings tab
-		this.addSettingTab(new PaperCanvasSettingTab(this.app, this));
-	}
+        this.addCommand({
+             id: 'apply-paper-canvas-bounds',
+             name: 'Apply Paper Canvas Bounds (Refresh)',
+             callback: () => {
+                const activeLeaf = this.app.workspace.activeLeaf;
+                if (this.isCanvasView(activeLeaf)) {
+                    console.log("Manually applying bounds via command.")
+                    this.setupCanvasObserverAndMarker(activeLeaf);
+                     this.checkExistingNodes(activeLeaf);
+                } else {
+                    this.showNotice("No active canvas view found.");
+                }
+             }
+         });
+    }
 
-	onunload() {
-		// Unregister the view when the plugin is disabled
-		this.app.workspace.detachLeavesOfType(PAPER_CANVAS_VIEW_TYPE);
-	}
+    onunload() {
+        console.log('Unloading Paper Canvas Plugin (Draft v2)');
+        this.disconnectObserver();
+        this.removePageMarker();
+    }
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
+    // --- Core Logic ---
 
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+    handleLayoutChange = () => {
+        const activeLeaf = this.app.workspace.activeLeaf;
 
-	async createNewPaperCanvas() {
-		const leaf = this.app.workspace.getLeaf(true);
-		await leaf.setViewState({
-			type: PAPER_CANVAS_VIEW_TYPE,
-			state: { 
-				paperSize: this.settings.paperSize,
-				customWidth: this.settings.customWidth,
-				customHeight: this.settings.customHeight,
-				paperUnit: this.settings.paperUnit,
-				pages: [{ id: '1', nodes: [] }] // Start with one empty page
-			}
-		});
-	}
+        if (this.isCanvasView(activeLeaf)) {
+             const canvasElement = activeLeaf.view.containerEl.querySelector('.canvas');
+             // Also check if it's an HTMLElement here for safety, though less critical than below
+             if (canvasElement instanceof HTMLElement) {
+                 if (this.observedCanvasElement === canvasElement && this.observer) {
+                     return; // Already observing the correct element
+                 }
+                 console.log("Active leaf is a canvas view. Setting up bounds...");
+                 this.setupCanvasObserverAndMarker(activeLeaf);
+                 this.checkExistingNodes(activeLeaf);
+             } else if (canvasElement) {
+                console.error("Paper Canvas: Found '.canvas' but it's not an HTMLElement in handleLayoutChange.");
+                this.disconnectObserver(); // Disconnect if the element is weird
+                this.removePageMarker();
+                this.observedCanvasElement = null;
+             } else {
+                 // '.canvas' not found yet, might be loading, don't disconnect existing observer yet
+             }
 
-	getPaperDimensions(): { width: number, height: number } {
-		if (this.settings.paperSize === 'custom') {
-			return {
-				width: this.settings.customWidth,
-				height: this.settings.customHeight
-			};
-		} else {
-			return PAPER_SIZES[this.settings.paperSize as keyof typeof PAPER_SIZES];
+        } else {
+            // Active leaf is not a canvas, definitely clean up
+            this.disconnectObserver();
+            this.removePageMarker();
+            this.observedCanvasElement = null;
+        }
+    }
 
-		}
-	}
-}
+    isCanvasView(leaf: WorkspaceLeaf | null | undefined): leaf is WorkspaceLeaf & { view: { getViewType: () => 'canvas', containerEl: HTMLElement, [key: string]: any } } {
+        return !!leaf && leaf.view?.getViewType() === 'canvas';
+    }
 
-class PaperCanvasSettingTab extends PluginSettingTab {
-	plugin: PaperCanvasPlugin;
+    setupCanvasObserverAndMarker(leaf: WorkspaceLeaf) {
+         if (!this.isCanvasView(leaf)) return;
 
-	constructor(app: App, plugin: PaperCanvasPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+         // It's good practice to disconnect/remove existing before setting up new ones
+         this.disconnectObserver();
+         this.removePageMarker();
 
-	display(): void {
-		const { containerEl } = this;
+        const view = leaf.view;
+        const container = view.containerEl;
 
-		containerEl.empty();
+        const canvasElement = container.querySelector('.canvas');
 
-		containerEl.createEl('h2', { text: 'Paper Canvas Settings' });
+        if (!canvasElement) {
+            console.error("Paper Canvas: Could not find the main canvas element (div.canvas). Cannot add marker or observer.");
+            return;
+        }
 
-		new Setting(containerEl)
-			.setName('Paper Size')
-			.setDesc('Choose a predefined paper size or select custom to specify dimensions')
-			.addDropdown(dropdown => dropdown
-				.addOption('a4', 'A4')
-				.addOption('a5', 'A5')
-				.addOption('letter', 'Letter')
-				.addOption('legal', 'Legal')
-				.addOption('custom', 'Custom')
-				.setValue(this.plugin.settings.paperSize)
-				.onChange(async (value) => {
-					this.plugin.settings.paperSize = value;
-					await this.plugin.saveSettings();
-					// Refresh the display to show/hide custom size inputs
-					this.display();
-				}));
+        // *** ADDED TYPE GUARD ***
+        if (!(canvasElement instanceof HTMLElement)) {
+             console.error("Paper Canvas: The found '.canvas' element is not an HTMLElement as expected:", canvasElement);
+             return;
+        }
+        // *** END OF ADDED CHECK ***
 
-		if (this.plugin.settings.paperSize === 'custom') {
-			new Setting(containerEl)
-				.setName('Custom Width')
-				.setDesc('Width of the paper')
-				.addText(text => text
-					.setValue(this.plugin.settings.customWidth.toString())
-					.onChange(async (value) => {
-						const numValue = parseFloat(value);
-						if (!isNaN(numValue) && numValue > 0) {
-							this.plugin.settings.customWidth = numValue;
-							await this.plugin.saveSettings();
-						}
-					}));
+        this.observedCanvasElement = canvasElement; // Assign the verified HTMLElement
 
-			new Setting(containerEl)
-				.setName('Custom Height')
-				.setDesc('Height of the paper')
-				.addText(text => text
-					.setValue(this.plugin.settings.customHeight.toString())
-					.onChange(async (value) => {
-						const numValue = parseFloat(value);
-						if (!isNaN(numValue) && numValue > 0) {
-							this.plugin.settings.customHeight = numValue;
-							await this.plugin.saveSettings();
-						}
-					}));
+        // --- 1. Add Visual Page Marker ---
+        this.pageMarkerElement = document.createElement('div');
+        this.pageMarkerElement.addClass('paper-canvas-page-marker');
+        this.pageMarkerElement.setCssStyles({
+            position: 'absolute',
+            left: `${PAGE_BOUNDS.minX}px`,
+            top: `${PAGE_BOUNDS.minY}px`,
+            width: `${PAGE_WIDTH_PX}px`,
+            height: `${PAGE_HEIGHT_PX}px`,
+            border: '1px dashed grey',
+            pointerEvents: 'none',
+            zIndex: '0'
+        });
 
-			new Setting(containerEl)
-				.setName('Unit')
-				.setDesc('Unit of measurement')
-				.addDropdown(dropdown => dropdown
-					.addOption('mm', 'Millimeters (mm)')
-					.addOption('cm', 'Centimeters (cm)')
-					.addOption('in', 'Inches (in)')
-					.setValue(this.plugin.settings.paperUnit)
-					.onChange(async (value) => {
-						this.plugin.settings.paperUnit = value;
-						await this.plugin.saveSettings();
-					}));
-		}
-	}
+        canvasElement.prepend(this.pageMarkerElement);
+        console.log("Paper Canvas: Page marker added to div.canvas.");
+
+        // --- 2. Setup Mutation Observer ---
+        this.observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'style') {
+                    // Ensure mutation.target is also HTMLElement before passing
+                    if (mutation.target instanceof HTMLElement && mutation.target.classList.contains('canvas-node')) {
+                        this.enforceBounds(mutation.target);
+                    }
+                }
+            });
+        });
+
+        this.observer.observe(canvasElement, { // Observe the verified HTMLElement
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['style'],
+        });
+
+        console.log("Paper Canvas: MutationObserver attached to div.canvas.");
+    }
+
+     checkExistingNodes(leaf: WorkspaceLeaf | null) {
+         if (!this.isCanvasView(leaf)) return;
+
+         const canvasElement = leaf.view.containerEl.querySelector('.canvas');
+         // Add type guard here too for robustness
+         if (!(canvasElement instanceof HTMLElement)) {
+             console.error("Paper Canvas: Cannot check existing nodes, '.canvas' is not an HTMLElement.");
+             return;
+         };
+
+         const existingNodes = canvasElement.querySelectorAll('.canvas-node');
+         console.log(`Paper Canvas: Checking bounds for ${existingNodes.length} existing nodes.`);
+         existingNodes.forEach(node => {
+             // NodeList elements are 'Element', add check here too
+             if (node instanceof HTMLElement) {
+                 this.enforceBounds(node);
+             }
+         });
+     }
+
+
+    disconnectObserver() {
+        if (this.observer) {
+            this.observer.disconnect();
+            this.observer = null;
+             // Clear the reference only when explicitly disconnecting
+             // Avoid clearing it if just switching between canvas views handled by handleLayoutChange
+             // Let's move the null assignment here for simplicity on unload/failure.
+             this.observedCanvasElement = null;
+            console.log("Paper Canvas: MutationObserver disconnected.");
+        }
+    }
+
+     removePageMarker() {
+         if (this.pageMarkerElement) {
+             this.pageMarkerElement.remove();
+             this.pageMarkerElement = null;
+             console.log("Paper Canvas: Page marker removed.");
+         }
+     }
+
+    // --- Bounds Enforcement ---
+
+    // getNodeRect expects HTMLElement, so ensure calls pass HTMLElement
+    getNodeRect(nodeEl: HTMLElement): { x: number; y: number; width: number; height: number } | null {
+        const style = nodeEl.style;
+        const transform = style.transform;
+        let x = NaN, y = NaN;
+
+        if (transform && transform.includes('translate')) {
+            const match = transform.match(/translate\(\s*(-?[\d.]+px)\s*,\s*(-?[\d.]+px)\s*\)/);
+            if (match && match[1] && match[2]) {
+                x = parseFloat(match[1]);
+                y = parseFloat(match[2]);
+            }
+        }
+
+        if (isNaN(x) || isNaN(y)) {
+            return null;
+        }
+
+        let width = nodeEl.offsetWidth;
+        let height = nodeEl.offsetHeight;
+
+         if (style.width && style.width.endsWith('px')) {
+             width = parseFloat(style.width) || width;
+         }
+         if (style.height && style.height.endsWith('px')) {
+             height = parseFloat(style.height) || height;
+         }
+
+        if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+             console.warn(`Paper Canvas: Invalid dimensions for node ${nodeEl.id || '(no id)'}. W: ${width}, H: ${height}`);
+            return null;
+        }
+        return { x, y, width, height };
+    }
+
+    // enforceBounds expects HTMLElement
+    enforceBounds(nodeEl: HTMLElement) {
+        if (nodeEl.dataset.checkingBounds === 'true') return;
+
+        const rect = this.getNodeRect(nodeEl);
+        if (!rect) {
+            return;
+        }
+
+        nodeEl.dataset.checkingBounds = 'true';
+
+        let { x, y, width, height } = rect;
+        let correctedX = x;
+        let correctedY = y;
+        let changed = false;
+
+        if (correctedX < PAGE_BOUNDS.minX) { correctedX = PAGE_BOUNDS.minX; changed = true; }
+        if (correctedX + width > PAGE_BOUNDS.maxX) { correctedX = PAGE_BOUNDS.maxX - width; changed = true; }
+        if (correctedY < PAGE_BOUNDS.minY) { correctedY = PAGE_BOUNDS.minY; changed = true; }
+        if (correctedY + height > PAGE_BOUNDS.maxY) { correctedY = PAGE_BOUNDS.maxY - height; changed = true; }
+
+        if (width > PAGE_WIDTH_PX && correctedX < PAGE_BOUNDS.minX) correctedX = PAGE_BOUNDS.minX;
+        if (height > PAGE_HEIGHT_PX && correctedY < PAGE_BOUNDS.minY) correctedY = PAGE_BOUNDS.minY;
+
+
+        if (changed) {
+             console.log(`Paper Canvas: Node ${nodeEl.id || '(no id)'} out of bounds. Correcting position to (${correctedX}, ${correctedY})`);
+
+             const currentTransform = nodeEl.style.transform || '';
+             const otherTransforms = currentTransform.replace(/translate\([^)]+\)/, '').trim();
+             const newTransform = `translate(${correctedX}px, ${correctedY}px) ${otherTransforms}`.trim();
+
+            nodeEl.style.transform = newTransform;
+        }
+
+        setTimeout(() => {
+            delete nodeEl.dataset.checkingBounds;
+        }, 0);
+    }
+
+     showNotice(message: string, duration: number = 5000) {
+         new Notice(message, duration);
+     }
 }
