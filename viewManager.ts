@@ -164,20 +164,22 @@ export class ViewManager {
     }
     fallbackScroll(leaf: WorkspaceLeaf, targetScrollTop: number): void { /* ... unchanged ... */ }
 
-    // Updated button handling
+    // *** Updated addActionButtons to remove first ***
     addActionButtons(leaf: WorkspaceLeaf, exportAllFn: ()=>void ): void {
-         if (!this.plugin.isCanvasView(leaf)) return;
-         const view = leaf.view; // Narrowed type
-         if (!view.addAction) { console.warn("View does not support addAction."); return; }
-         const header = view.containerEl.querySelector('.view-header .view-actions');
-         if (!header) { console.warn("Cannot find view header actions."); return; }
-         // Force remove existing first to prevent duplicates
-         header.querySelectorAll(`.${EXPORT_ALL_BUTTON_CLASS}`).forEach(btn => btn.remove());
-         header.querySelectorAll(`.${EXPORT_BUTTON_CLASS}`).forEach(btn => btn.remove()); // Cleanup old button
-         // Add Export All Pages Button
-         view.addAction( "lucide-book-down", "Export All Pages as PDF", exportAllFn, { class: EXPORT_ALL_BUTTON_CLASS } );
-         console.log("ViewManager: Added export all button.");
-    }
+        if (!this.plugin.isCanvasView(leaf)) return;
+        const view = leaf.view;
+        if (!view.addAction) { console.warn("addAction not available on this view."); return; }
+        const header = view.containerEl.querySelector('.view-header .view-actions');
+        if (!header) { console.warn("Cannot find view header actions."); return; }
+
+        // ** Force remove existing first **
+        header.querySelectorAll(`.${EXPORT_ALL_BUTTON_CLASS}`).forEach(btn => btn.remove());
+        header.querySelectorAll(`.${EXPORT_BUTTON_CLASS}`).forEach(btn => btn.remove()); // Cleanup old button class
+
+        // Add Export All Pages Button
+        view.addAction( "lucide-book-down", "Export All Pages as PDF", exportAllFn, { class: EXPORT_ALL_BUTTON_CLASS } );
+        console.log("ViewManager: Added export all button.");
+   }
     removeActionButtons(): void {
         console.log("ViewManager: Removing action buttons from all canvas leaves...");
         this.plugin.app.workspace.getLeavesOfType('canvas').forEach((leaf: WorkspaceLeaf) => {

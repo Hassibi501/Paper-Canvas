@@ -102,7 +102,7 @@ export default class PaperCanvasPlugin extends Plugin implements PaperCanvasPlug
                  this.stateManager.getCurrentPageIndex(),
                  this.stateManager.getAllNodeStates() // Call function
              );
-        }
+        } 
     }
 
     // --- Event Handlers --- (Arrow functions for correct 'this')
@@ -110,8 +110,10 @@ export default class PaperCanvasPlugin extends Plugin implements PaperCanvasPlug
         await this.updatePluginStateForLeaf(this.app.workspace.activeLeaf);
     }
     private handleActiveLeafChange = async (leaf: WorkspaceLeaf | null): Promise<void> => {
-         await this.updatePluginStateForLeaf(leaf);
+         await this.UpdatePluginStateForLeaf(leaf);
     }
+
+
 
     // Central logic for handling leaf changes
     private async updatePluginStateForLeaf(activeLeaf: WorkspaceLeaf | null): Promise<void> {
